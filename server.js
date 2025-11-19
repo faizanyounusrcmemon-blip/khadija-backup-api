@@ -1,56 +1,46 @@
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const multer = require("multer");
-const backup = require("./backup");
-const restore = require("./restore");
+const doBackup = require("./backup");
+const listBackups = require("./listBackups");
+const restoreFromBucket = require("./restoreFromBucket");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ⭐ Vercel Allowed Storage → MEMORY
-const upload = multer({ storage: multer.memoryStorage() });
+// Health check
+app.get("/", (req, res) => res.json({ ok: true }));
 
-app.get("/", (req, res) => {
-  res.send("Backup API is running...");
-});
-
-// ----------------------
-// 🔥 TAKE BACKUP
-// ----------------------
+// --- Trigger Manual Backup ---
 app.post("/api/backup", async (req, res) => {
   try {
-    const result = await backup();
-    return res.json({ success: true, file: result });
-  } catch (e) {
-    return res.json({ success: false, error: e.message });
-  }
-});
-
-// ----------------------
-// 🔥 RESTORE BACKUP (with Password)
-// ----------------------
-app.post("/api/restore", upload.single("file"), async (req, res) => {
-  try {
-    const { password } = req.body;
-
-    if (password !== process.env.RESTORE_PASSWORD) {
-      return res.json({ success: false, error: "Wrong password!" });
-    }
-
-    if (!req.file) {
-      return res.json({ success: false, error: "No file received" });
-    }
-
-    const buffer = req.file.buffer;
-
-    const result = await restore(buffer);
-
-    res.json({ success: true, restored: result });
+    const result = await doBackup();
+    res.json({ success: true, result });
   } catch (err) {
-    res.json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// Export for Vercel
-module.exports = app;
+// --- LIST BACKUP FILES FROM SUPABASE BUCKET ---
+app.get("/api/list-backups", async (req, res) => {
+  try {
+    const files = await listBackups();
+    res.json({ success: true, files });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// --- RESTORE FROM SUPABASE BUCKET ---
+app.post("/api/restore-from-bucket", async (req, res) => {
+  try {
+    const result = await restoreFromBucket(req);
+    res.json({ success: true, result });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log("🚀 Server running on port", PORT));
