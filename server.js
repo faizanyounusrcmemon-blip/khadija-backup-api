@@ -1,31 +1,56 @@
-// server.js
-require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
-const doBackup = require("./backup");
-const restoreBackup = require("./restore");
-const cron = require("node-cron");
-
-const upload = multer({ dest: "uploads/" });
+const backup = require("./backup");
+const restore = require("./restore");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.get("/", (req, res) => res.json({ ok: true }));
+// ⭐ Vercel Allowed Storage → MEMORY
+const upload = multer({ storage: multer.memoryStorage() });
 
+app.get("/", (req, res) => {
+  res.send("Backup API is running...");
+});
+
+// ----------------------
+// 🔥 TAKE BACKUP
+// ----------------------
 app.post("/api/backup", async (req, res) => {
-  const result = await doBackup();
-  res.json(result);
+  try {
+    const result = await backup();
+    return res.json({ success: true, file: result });
+  } catch (e) {
+    return res.json({ success: false, error: e.message });
+  }
 });
 
-app.post("/api/restore", upload.single("file"), restoreBackup);
+// ----------------------
+// 🔥 RESTORE BACKUP (with Password)
+// ----------------------
+app.post("/api/restore", upload.single("file"), async (req, res) => {
+  try {
+    const { password } = req.body;
 
-// Auto backup daily 12 AM
-cron.schedule("0 0 * * *", async () => {
-  console.log("⏳ Auto Backup Running…");
-  await doBackup();
+    if (password !== process.env.RESTORE_PASSWORD) {
+      return res.json({ success: false, error: "Wrong password!" });
+    }
+
+    if (!req.file) {
+      return res.json({ success: false, error: "No file received" });
+    }
+
+    const buffer = req.file.buffer;
+
+    const result = await restore(buffer);
+
+    res.json({ success: true, restored: result });
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
 });
 
-app.listen(5000, () => console.log("Server running…"));
+// Export for Vercel
+module.exports = app;
