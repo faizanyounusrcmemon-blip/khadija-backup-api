@@ -1,79 +1,109 @@
-import { createClient } from "@supabase/supabase-js";
-import archiver from "archiver";
-import fs from "fs";
-import os from "os";
-import path from "path";
+// backup.js
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+const archiver = require("archiver");
+const { Parser } = require("json2csv");
+const dayjs = require("dayjs");
+const { createClient } = require("@supabase/supabase-js");
 
-export default async function handler(req, res) {
+const TABLES = ["sales","purchases","items","customers","app_users"];
+const BUCKET = process.env.BACKUP_BUCKET || "backups"; // supabase bucket name
+
+function rowsToCsv(rows) {
+  const parser = new Parser({ flatten: true });
+  return parser.parse(rows || []);
+}
+
+async function deleteOldBackups(supabase) {
   try {
-    if (req.method !== "POST") {
-      return res.status(405).json({ ok: false, message: "POST only" });
+    const { data, error } = await supabase.storage.from(BUCKET).list("", { limit: 1000 });
+    if (error) {
+      console.warn("List bucket error:", error.message || error);
+      return;
     }
+    const FIFTEEN = 15 * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    for (const f of data) {
+      // supabase storage list returns { name, id, updated_at, created_at, ... }
+      const t = f.updated_at || f.created_at;
+      if (!t) continue;
+      const created = new Date(t).getTime();
+      if (now - created > FIFTEEN) {
+        await supabase.storage.from(BUCKET).remove([f.name]);
+        console.log("Deleted old backup:", f.name);
+      }
+    }
+  } catch (e) {
+    console.warn("deleteOldBackups error:", e.message || e);
+  }
+}
 
-    const SUPABASE_URL = process.env.SUPABASE_URL;
-    const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+module.exports = async function doBackup() {
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error("SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing");
+  }
+  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+  const tmp = os.tmpdir();
+  const stamp = dayjs().format("YYYY-MM-DD_HH-mm-ss");
+  const folder = path.join(tmp, `backup_${stamp}`);
+  fs.mkdirSync(folder, { recursive: true });
 
-    const tmp = os.tmpdir();
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const folder = path.join(tmp, `backup_${stamp}`);
-
-    fs.mkdirSync(folder, { recursive: true });
-
-    const TABLES = ["sales", "purchases", "items", "customers", "app_users"];
-    const csvFiles = [];
-
+  try {
+    // export each table to CSV
     for (const table of TABLES) {
-      const { data, error } = await supabase.from(table).select("*");
-      if (error) continue;
-
-      const csvPath = path.join(folder, `${table}.csv`);
-      const header = Object.keys(data[0] || {}).join(",") + "\n";
-      const rows = data.map(r => Object.values(r).join(",")).join("\n");
-
-      fs.writeFileSync(csvPath, header + rows, "utf8");
-      csvFiles.push(csvPath);
+      const q = await supabase.from(table).select("*");
+      if (q.error) {
+        console.warn("Supabase select error", table, q.error.message || q.error);
+        fs.writeFileSync(path.join(folder, `${table}.csv`), ""); // write empty file
+        continue;
+      }
+      const rows = q.data || [];
+      const csv = rowsToCsv(rows);
+      fs.writeFileSync(path.join(folder, `${table}.csv`), csv, "utf8");
     }
 
-    // ZIP FILE CREATE
-    const zipPath = path.join(tmp, `backup_${stamp}.zip`);
+    // zip them
+    const zipName = `backup_${stamp}.zip`;
+    const zipPath = path.join(tmp, zipName);
     await new Promise((resolve, reject) => {
       const output = fs.createWriteStream(zipPath);
       const archive = archiver("zip", { zlib: { level: 9 } });
-
-      archive.on("error", reject);
       output.on("close", resolve);
-
+      archive.on("error", reject);
       archive.pipe(output);
-      csvFiles.forEach(f =>
-        archive.file(f, { name: path.basename(f) })
-      );
+      TABLES.forEach(t => {
+        const p = path.join(folder, `${t}.csv`);
+        if (fs.existsSync(p)) archive.file(p, { name: `${t}.csv` });
+      });
       archive.finalize();
     });
 
-    // UPLOAD ZIP TO SUPABASE STORAGE
-    const zipBuffer = fs.readFileSync(zipPath);
-    const uploadPath = `backups/backup_${stamp}.zip`;
+    // upload zip to supabase storage
+    const fileBuffer = fs.readFileSync(zipPath);
+    const remoteName = zipName; // you can include folder if you want: `backups/${zipName}`
 
-    const { error: uploadError } = await supabase.storage
-      .from("backups")
-      .upload(uploadPath, zipBuffer, {
-        contentType: "application/zip",
-      });
-
-    if (uploadError) throw uploadError;
-
-    return res.json({
-      ok: true,
-      message: "Backup saved in Supabase Storage",
-      file: uploadPath,
+    const { data, error } = await supabase.storage.from(BUCKET).upload(remoteName, fileBuffer, {
+      contentType: "application/zip",
+      upsert: false // false => won't overwrite same name; set true if you want overwrite
     });
+    if (error) throw error;
 
-  } catch (err) {
-    return res.status(500).json({
-      ok: false,
-      message: err.message,
-    });
+    // cleanup local tmp folder files
+    try { fs.rmSync(folder, { recursive: true, force: true }); } catch (e){}
+
+    // delete old backups older than 15 days
+    await deleteOldBackups(supabase);
+
+    return {
+      success: true,
+      file: data,
+      uploadedName: remoteName
+    };
+  } catch (e) {
+    // cleanup
+    try { fs.rmSync(folder, { recursive: true, force: true }); } catch (err){}
+    throw e;
   }
-}
+};
