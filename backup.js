@@ -1,130 +1,94 @@
-// backup.js
-const { createClient } = require("@supabase/supabase-js");
-const archiver = require("archiver");
-const dayjs = require("dayjs");
-const utc = require("dayjs/plugin/utc");
-dayjs.extend(utc);
-
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
+const archiver = require("archiver");
+const dayjs = require("dayjs");
+const supabase = require("./db");
 
-// --------------------------------------------------
-// 🔐 Load ENV
-// --------------------------------------------------
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+// DELETE OLD BACKUPS (15 DAYS)
+async function deleteOldBackups() {
+  const BUCKET = "backups";
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const { data } = await supabase.storage.from(BUCKET).list("", { limit: 100 });
 
-// --------------------------------------------------
-// 📌 Backup Tables List
-// --------------------------------------------------
-const TABLES = ["sales", "purchases", "items", "customers", "app_users"];
+  if (!data) return;
 
-// --------------------------------------------------
-// 📦 MAIN BACKUP FUNCTION
-// --------------------------------------------------
-async function backup() {
-  try {
-    console.log("🔵 Starting Backup...");
+  const now = Date.now();
+  const LIMIT = 15 * 24 * 60 * 60 * 1000;
 
-    // --------------------------------------------------
-    // ⏰ Correct Pakistan Time (UTC+5)
-    // --------------------------------------------------
-    const nowUTC = dayjs().utc();
-    const timestamp = nowUTC.add(5, "hour").format("YYYY-MM-DD_HH-mm-ss");
-    console.log("⏰ Timestamp:", timestamp);
-
-    const folder = `/tmp/backup_${timestamp}`;
-    fs.mkdirSync(folder, { recursive: true });
-
-    const csvFiles = [];
-
-    // --------------------------------------------------
-    // 📄 Convert Each Table to CSV
-    // --------------------------------------------------
-    for (const table of TABLES) {
-      console.log("➡ Exporting table:", table);
-
-      const { data, error } = await supabase.from(table).select("*");
-      if (error) {
-        console.error("❌ Error reading:", table, error.message);
-        continue;
-      }
-
-      const filePath = path.join(folder, `${table}.csv`);
-      fs.writeFileSync(filePath, convertToCSV(data), "utf8");
-      csvFiles.push(filePath);
+  for (const file of data) {
+    const fileTime = new Date(file.created_at).getTime();
+    if (now - fileTime > LIMIT) {
+      await supabase.storage.from(BUCKET).remove([file.name]);
+      console.log("🗑 Deleted old backup:", file.name);
     }
-
-    // --------------------------------------------------
-    // 🗜 Create ZIP
-    // --------------------------------------------------
-    const zipPath = `/tmp/backup_${timestamp}.zip`;
-    await zipFiles(csvFiles, zipPath);
-    console.log("📦 ZIP created:", zipPath);
-
-    // --------------------------------------------------
-    // ☁ Upload to Supabase Storage (Bucket: backups)
-    // --------------------------------------------------
-    const fileBuffer = fs.readFileSync(zipPath);
-    const uploadName = `backup_${timestamp}.zip`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("backups")
-      .upload(uploadName, fileBuffer, {
-        contentType: "application/zip",
-        upsert: false,
-      });
-
-    if (uploadError) throw new Error(uploadError.message);
-
-    console.log("☁ Uploaded:", uploadName);
-
-    return {
-      success: true,
-      filename: uploadName,
-    };
-  } catch (err) {
-    console.error("❌ Backup Failed:", err.message);
-    return { success: false, error: err.message };
   }
 }
 
-// --------------------------------------------------
-// 📄 Convert JSON → CSV
-// --------------------------------------------------
-function convertToCSV(rows) {
-  if (!rows || rows.length === 0) return "";
+module.exports = async function doBackup() {
+  try {
+    const BUCKET = "backups";
 
-  const keys = Object.keys(rows[0]);
-  let csv = keys.join(",") + "\n";
+    // Correct Pakistan Time
+    const timestamp = dayjs().format("YYYY-MM-DD_HH-mm-ss");
 
-  rows.forEach((row) => {
-    csv += keys.map((k) => JSON.stringify(row[k] ?? "")).join(",") + "\n";
-  });
+    const tmp = os.tmpdir();
+    const folder = path.join(tmp, `backup_${timestamp}`);
 
-  return csv;
-}
+    fs.mkdirSync(folder, { recursive: true });
 
-// --------------------------------------------------
-// 🗜 ZIP HELPER
-// --------------------------------------------------
-function zipFiles(files, outputZip) {
-  return new Promise((resolve, reject) => {
-    const output = fs.createWriteStream(outputZip);
-    const archive = archiver("zip", { zlib: { level: 9 } });
+    const TABLES = ["sales", "purchases", "items", "customers", "app_users"];
 
-    archive.pipe(output);
-    output.on("close", resolve);
-    archive.on("error", reject);
+    const csvFiles = [];
 
-    files.forEach((file) => {
-      archive.file(file, { name: path.basename(file) });
+    for (const table of TABLES) {
+      const { data, error } = await supabase.from(table).select("*");
+
+      if (error) continue;
+
+      const filePath = path.join(folder, `${table}.csv`);
+      const keys = Object.keys(data[0] || {});
+      const header = keys.join(",") + "\n";
+      const rows = data
+        .map((r) => keys.map((k) => JSON.stringify(r[k] || "")).join(","))
+        .join("\n");
+
+      fs.writeFileSync(filePath, header + rows);
+      csvFiles.push(filePath);
+    }
+
+    // CREATE ZIP
+    const zipPath = path.join(tmp, `backup_${timestamp}.zip`);
+
+    await new Promise((resolve, reject) => {
+      const output = fs.createWriteStream(zipPath);
+      const archive = archiver("zip", { zlib: { level: 9 } });
+
+      output.on("close", resolve);
+      archive.on("error", reject);
+
+      archive.pipe(output);
+      csvFiles.forEach((file) =>
+        archive.file(file, { name: path.basename(file) })
+      );
+      archive.finalize();
     });
 
-    archive.finalize();
-  });
-}
+    // UPLOAD ZIP
+    const zipData = fs.readFileSync(zipPath);
 
-module.exports = backup;
+    const uploadRes = await supabase.storage
+      .from(BUCKET)
+      .upload(`backup_${timestamp}.zip`, zipData, {
+        contentType: "application/zip",
+      });
+
+    if (uploadRes.error) throw new Error(uploadRes.error.message);
+
+    await deleteOldBackups();
+
+    return { success: true, file: `backup_${timestamp}.zip` };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+};
