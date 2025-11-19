@@ -30,7 +30,9 @@ module.exports = async function doBackup() {
   try {
     const BUCKET = "backups";
 
-    const stamp = dayjs().format("YYYY-MM-DD_HH-mm-ss");
+    const timestamp = dayjs()
+      .add(5, "hour")   // ← Pakistan Time Fix (UTC+5)
+      .format("YYYY-MM-DD_HH-mm-ss");
     const tmp = os.tmpdir();
     const folder = path.join(tmp, `backup_${stamp}`);
 
