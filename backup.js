@@ -30,7 +30,7 @@ module.exports = async function doBackup() {
     const BUCKET = "backups";
 
     // Correct Pakistan Time
-    const timestamp = dayjs().format("YYYY-MM-DD_HH-mm-ss");
+    const timestamp = dayjs().add(5, "hour").format("YYYY-MM-DD_HH-mm-ss");
 
     const tmp = os.tmpdir();
     const folder = path.join(tmp, `backup_${timestamp}`);
@@ -44,7 +44,7 @@ module.exports = async function doBackup() {
     for (const table of TABLES) {
       const { data, error } = await supabase.from(table).select("*");
 
-      if (error) continue;
+      if (error || !data) continue;
 
       const filePath = path.join(folder, `${table}.csv`);
       const keys = Object.keys(data[0] || {});
@@ -89,6 +89,7 @@ module.exports = async function doBackup() {
 
     return { success: true, file: `backup_${timestamp}.zip` };
   } catch (e) {
+    console.log("❌ Backup Error:", e.message);
     return { success: false, error: e.message };
   }
 };
