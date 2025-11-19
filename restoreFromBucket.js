@@ -1,90 +1,147 @@
+// restore-from-bucket.js
 const supabase = require("./db");
-const os = require("os");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const unzipper = require("unzipper");
+const dayjs = require("dayjs");
 
-const PASSWORD = "faizanyounus";
+// Allowed tables
+const TABLES = ["sales", "purchases", "items", "customers", "app_users"];
 
-module.exports = async function restoreFromBucket(req) {
-  return new Promise(async (resolve, reject) => {
-    try {
-      const busboy = require("busboy");
-      const bb = busboy({ headers: req.headers });
+module.exports = async function restoreFromBucket(req, res) {
+  try {
+    const { password, fileName, mode, table } = req.body;
 
-      let password = "";
-      let fileName = "";
-      let mode = "full";
-      let table = "";
-
-      bb.on("field", (name, val) => {
-        if (name === "password") password = val;
-        if (name === "fileName") fileName = val;
-        if (name === "mode") mode = val;
-        if (name === "table") table = val;
-      });
-
-      bb.on("finish", async () => {
-        if (password !== PASSWORD) {
-          return reject(new Error("Invalid restore password"));
-        }
-
-        // STEP 1 → Download file from bucket
-        const { data, error } = await supabase.storage
-          .from("backups")
-          .download(fileName);
-
-        if (error) return reject(error);
-
-        const tmpZipPath = path.join(os.tmpdir(), fileName);
-        fs.writeFileSync(tmpZipPath, Buffer.from(await data.arrayBuffer()));
-
-        // STEP 2 → Unzip files
-        const extractPath = path.join(os.tmpdir(), "restore_" + Date.now());
-        fs.mkdirSync(extractPath);
-
-        await fs
-          .createReadStream(tmpZipPath)
-          .pipe(unzipper.Extract({ path: extractPath }))
-          .promise();
-
-        // STEP 3 → Restore logic
-        const TABLES = ["sales", "purchases", "items", "customers", "app_users"];
-
-        async function restoreTable(tbl) {
-          const csvPath = path.join(extractPath, `${tbl}.csv`);
-          if (!fs.existsSync(csvPath)) return;
-
-          const csv = fs.readFileSync(csvPath, "utf8");
-          const rows = csv
-            .split("\n")
-            .map((l) => l.trim())
-            .filter((x) => x.length > 0);
-
-          // delete old data
-          await supabase.from(tbl).delete().neq("id", 0);
-
-          // insert rows
-          for (const row of rows) {
-            const cols = row.split(",");
-            await supabase.from(tbl).insert({
-              ...Object.fromEntries(cols.map((v, i) => [`col${i}`, v])),
-            });
-          }
-        }
-
-        if (mode === "full") {
-          for (const tbl of TABLES) await restoreTable(tbl);
-        } else if (mode === "table") {
-          await restoreTable(table);
-        }
-
-        resolve({ restored: mode === "full" ? "ALL" : table });
-      });
-
-      req.pipe(bb);
-    } catch (err) {
-      reject(err);
+    if (password !== "faizanyounus") {
+      return res.json({ success: false, error: "Invalid password" });
     }
-  });
+
+    if (!fileName) {
+      return res.json({ success: false, error: "File name missing" });
+    }
+
+    const BUCKET = "backups";
+
+    // Download ZIP from Supabase Storage
+    const { data, error } = await supabase.storage
+      .from(BUCKET)
+      .download(fileName);
+
+    if (error || !data) {
+      return res.json({
+        success: false,
+        error: "Failed to download backup zip",
+      });
+    }
+
+    // Save ZIP temporarily
+    const tmp = os.tmpdir();
+    const zipPath = path.join(tmp, fileName);
+    fs.writeFileSync(zipPath, Buffer.from(await data.arrayBuffer()));
+
+    const extractPath = path.join(tmp, "restore_" + Date.now());
+    fs.mkdirSync(extractPath, { recursive: true });
+
+    // Extract ZIP
+    await fs
+      .createReadStream(zipPath)
+      .pipe(unzipper.Extract({ path: extractPath }))
+      .promise();
+
+    // =============================
+    // FULL RESTORE
+    // =============================
+    if (mode === "full") {
+      for (const tbl of TABLES) {
+        const file = path.join(extractPath, `${tbl}.csv`);
+        if (!fs.existsSync(file)) continue;
+
+        await restoreTable(tbl, file);
+      }
+    }
+
+    // =============================
+    // SINGLE TABLE RESTORE
+    // =============================
+    if (mode === "table") {
+      const file = path.join(extractPath, `${table}.csv`);
+      if (!fs.existsSync(file)) {
+        return res.json({
+          success: false,
+          error: "Table file not found in backup",
+        });
+      }
+
+      await restoreTable(table, file);
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    return res.json({ success: false, error: err.message });
+  }
 };
+
+// ------------------------------------------
+// Restore Single Table
+// ------------------------------------------
+async function restoreTable(table, filePath) {
+  console.log("Restoring:", table);
+
+  // Read CSV
+  const content = fs.readFileSync(filePath, "utf8").split("\n");
+  const header = content[0].split(",");
+
+  const rows = content
+    .slice(1)
+    .filter((l) => l.trim() !== "")
+    .map((line) => {
+      const values = splitCSV(line);
+      const obj = {};
+      header.forEach((h, i) => {
+        obj[h] = values[i] || null;
+      });
+      return obj;
+    });
+
+  // Delete old data
+  await supabase.from(table).delete().neq("id", 0);
+
+  // Insert new data
+  const { error } = await supabase.from(table).insert(rows);
+
+  if (error) {
+    console.log("Restore error in table:", table, error.message);
+    throw new Error(error.message);
+  }
+
+  console.log("Restore completed for:", table);
+}
+
+// ------------------------------------------
+// Helper: Proper CSV splitting
+// ------------------------------------------
+function splitCSV(str) {
+  const arr = [];
+  let cur = "";
+  let insideQuotes = false;
+
+  for (let ch of str) {
+    if (ch === '"' && insideQuotes) {
+      insideQuotes = false;
+      continue;
+    }
+    if (ch === '"' && !insideQuotes) {
+      insideQuotes = true;
+      continue;
+    }
+    if (ch === "," && !insideQuotes) {
+      arr.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  arr.push(cur);
+  return arr;
+}
