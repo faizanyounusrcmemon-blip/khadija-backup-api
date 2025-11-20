@@ -23,7 +23,7 @@ app.get("/", (req, res) => res.json({ ok: true }));
 // ---------------------------
 // BACKUP
 // ---------------------------
-app.post("/api/backup", async (req, res) => {
+app.post("/api/backups", async (req, res) => {
   const result = await doBackup();
   res.json(result);
 });
@@ -62,4 +62,5 @@ app.post("/api/restore-from-bucket", upload.none(), async (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log("🚀 Server running on port", PORT));
+
 
