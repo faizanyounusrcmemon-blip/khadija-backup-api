@@ -3,7 +3,7 @@ const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
 
-const doBackup = require("./backup");
+const doBackup = require("./backups");
 const listBackups = require("./listBackups");
 const restoreFromBucket = require("./restoreFromBucket");
 
@@ -62,3 +62,4 @@ app.post("/api/restore-from-bucket", upload.none(), async (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log("🚀 Server running on port", PORT));
+
