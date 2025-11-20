@@ -5,7 +5,10 @@ module.exports = async function listBackups() {
     .from("backups")
     .list("", { sortBy: { column: "name", order: "desc" } });
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    console.log("LIST ERROR:", error.message);
+    return [];
+  }
 
   return data.map((file) => ({
     name: file.name,
