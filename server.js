@@ -11,49 +11,51 @@ const app = express();
 
 app.use(cors());
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// ❌ IMPORTANT: DO NOT USE express.json() or express.urlencoded()
+// These break FormData body.
+// app.use(express.json());
+// app.use(express.urlencoded({ extended: true }));
 
-// FIX: using memoryStorage instead of .none()
+// multer for FormData
 const upload = multer({ storage: multer.memoryStorage() });
 
-// -------------------------------
-// Health
-// -------------------------------
+// ------------------------------
+// Health Check
+// ------------------------------
 app.get("/", (req, res) => res.json({ ok: true }));
 
-// -------------------------------
+// ------------------------------
 // BACKUP
-// -------------------------------
+// ------------------------------
 app.post("/api/backup", async (req, res) => {
   const result = await doBackup();
   res.json(result);
 });
 
-// -------------------------------
+// ------------------------------
 // LIST BACKUPS
-// -------------------------------
+// ------------------------------
 app.get("/api/list-backups", async (req, res) => {
   const files = await listBackups();
   res.json({ success: true, files });
 });
 
-// -------------------------------
-// RESTORE
-// -------------------------------
+// ------------------------------
+// RESTORE FULL / TABLE
+// ------------------------------
 app.post("/api/restore-from-bucket", upload.any(), async (req, res) => {
   try {
-    console.log("BODY:", req.body);
+    // FormData fields come in req.body
+    const body = req.body;
 
-    const result = await restoreFromBucket({ body: req.body });
+    const result = await restoreFromBucket({ body });
 
     res.json(result);
   } catch (err) {
-    console.log(err);
     res.json({ success: false, error: err.message });
   }
 });
 
-// -------------------------------
+// ------------------------------
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log("🚀 Server running on", PORT));
+app.listen(PORT, () => console.log("🚀 Server running on port", PORT));
