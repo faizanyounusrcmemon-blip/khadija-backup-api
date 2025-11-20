@@ -3,40 +3,59 @@ const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
 
-// Correct imports
+// API Modules
 const doBackup = require("./backup");
 const listBackups = require("./listBackups");
 const restoreFromBucket = require("./restoreFromBucket");
 
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
-// FormData handling
-const upload = multer({ storage: multer.none() });
+// Required for FormData
+const upload = multer({ storage: multer.memoryStorage() });
 
-// Health check
+// ---------------------------
+// Health Check
+// ---------------------------
 app.get("/", (req, res) => res.json({ ok: true }));
 
-// Backup
+// ---------------------------
+// Manual Backup
+// ---------------------------
 app.post("/api/backup", async (req, res) => {
-  const result = await doBackup();
-  res.json(result);
+  try {
+    const result = await doBackup();
+    res.json({ success: true, file: result.file });
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
 });
 
-// List Backups
+// ---------------------------
+// LIST BACKUPS
+// ---------------------------
 app.get("/api/list-backups", async (req, res) => {
-  const result = await listBackups();
-  res.json({ success: true, files: result });
+  try {
+    const files = await listBackups();
+    res.json({ success: true, files });
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
 });
 
-// Restore
+// ---------------------------
+// RESTORE FULL / TABLE
+// ---------------------------
 app.post("/api/restore-from-bucket", upload.none(), async (req, res) => {
-  const result = await restoreFromBucket(req);
-  res.json(result);
+  try {
+    const result = await restoreFromBucket(req);
+    res.json(result);
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
 });
 
-// Start server
+// ---------------------------
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log("🚀 Server running on", PORT));
+app.listen(PORT, () => console.log("🚀 Server running on port", PORT));
