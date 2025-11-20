@@ -4,7 +4,7 @@ const cors = require("cors");
 const multer = require("multer");
 
 // Correct imports
-const doBackup = require("./backup");
+const doBackup = require("./backup");       // ✔ FIXED (pehle backups likha hua tha)
 const listBackups = require("./listBackups");
 const restoreFromBucket = require("./restoreFromBucket");
 
@@ -13,7 +13,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ✔ FormData handle کرنے کیلئے بالکل صحیح طریقہ
+// ✔ FormData handle کرنے کیلئے یہی صحیح ہے
 const upload = multer({ storage: multer.none() });
 
 // ---------------------------
@@ -22,7 +22,7 @@ const upload = multer({ storage: multer.none() });
 app.get("/", (req, res) => res.json({ ok: true }));
 
 // ---------------------------
-// BACKUP (FULL BACKUP)
+// FULL BACKUP
 // ---------------------------
 app.post("/api/backup", async (req, res) => {
   try {
@@ -46,11 +46,11 @@ app.get("/api/list-backups", async (req, res) => {
 });
 
 // ---------------------------
-// RESTORE (FULL + TABLE)
+// RESTORE FULL + RESTORE TABLE
 // ---------------------------
 app.post("/api/restore-from-bucket", upload.none(), async (req, res) => {
   try {
-    console.log("REQ BODY:", req.body); // Debug check
+    console.log("REQ BODY:", req.body); // Debug
 
     const result = await restoreFromBucket(req);
 
@@ -59,7 +59,7 @@ app.post("/api/restore-from-bucket", upload.none(), async (req, res) => {
     }
 
     res.json({ success: true });
-
+    
   } catch (err) {
     res.json({ success: false, error: err.message });
   }
