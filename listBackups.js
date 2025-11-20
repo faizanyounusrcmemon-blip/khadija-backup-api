@@ -6,10 +6,7 @@ module.exports = async function listBackups() {
       .from("backups")
       .list("", { sortBy: { column: "name", order: "desc" } });
 
-    if (error) {
-      console.log("LIST ERROR:", error.message);
-      return [];
-    }
+    if (error) return [];
 
     return data.map((file) => ({
       name: file.name,
@@ -17,7 +14,6 @@ module.exports = async function listBackups() {
       size: file.metadata?.size || 0
     }));
   } catch (err) {
-    console.log("LIST CATCH ERROR:", err.message);
     return [];
   }
 };
