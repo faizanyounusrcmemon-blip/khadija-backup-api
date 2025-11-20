@@ -3,7 +3,8 @@ const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
 
-const doBackup = require("./backups");
+// Correct imports
+const doBackup = require("./backup");
 const listBackups = require("./listBackups");
 const restoreFromBucket = require("./restoreFromBucket");
 
@@ -12,7 +13,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 👍 FormData handle کرنے کے لئے یہی صحیح ہے
+// FormData handle کرنے کیلئے صرف یہی صحیح ہے
 const upload = multer({ storage: multer.none() });
 
 // ---------------------------
@@ -21,11 +22,15 @@ const upload = multer({ storage: multer.none() });
 app.get("/", (req, res) => res.json({ ok: true }));
 
 // ---------------------------
-// BACKUP
+// BACKUP (FULL BACKUP)
 // ---------------------------
-app.post("/api/backups", async (req, res) => {
-  const result = await doBackup();
-  res.json(result);
+app.post("/api/backup", async (req, res) => {
+  try {
+    const result = await doBackup();
+    res.json(result);
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
 });
 
 // ---------------------------
@@ -45,7 +50,7 @@ app.get("/api/list-backups", async (req, res) => {
 // ---------------------------
 app.post("/api/restore-from-bucket", upload.none(), async (req, res) => {
   try {
-    console.log("REQ BODY:", req.body); // Debug
+    console.log("REQ BODY:", req.body);  // debugging
 
     const result = await restoreFromBucket(req);
 
@@ -60,7 +65,8 @@ app.post("/api/restore-from-bucket", upload.none(), async (req, res) => {
   }
 });
 
+// ---------------------------
+// START SERVER
+// ---------------------------
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log("🚀 Server running on port", PORT));
-
-
