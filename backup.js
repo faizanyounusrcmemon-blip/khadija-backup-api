@@ -5,7 +5,7 @@ const archiver = require("archiver");
 const dayjs = require("dayjs");
 const supabase = require("./db");
 
-// DELETE OLD BACKUPS (15 DAYS)
+// Delete backups older than 15 days
 async function deleteOldBackups() {
   const BUCKET = "backups";
   const { data } = await supabase.storage.from(BUCKET).list("", { limit: 100 });
@@ -19,7 +19,6 @@ async function deleteOldBackups() {
     const fileTime = new Date(file.created_at).getTime();
     if (now - fileTime > LIMIT) {
       await supabase.storage.from(BUCKET).remove([file.name]);
-      console.log("🗑 Deleted old backup:", file.name);
     }
   }
 }
