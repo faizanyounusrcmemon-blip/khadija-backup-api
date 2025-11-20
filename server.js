@@ -1,32 +1,36 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const multer = require("multer");
 
-// Routes
 const doBackup = require("./backup");
 const listBackups = require("./listBackups");
 const restoreFromBucket = require("./restoreFromBucket");
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true })); 
-// ✔ VERY IMPORTANT → FormData + password + mode + table parse ہوگا
 
-// Health Check
+// 👍 FormData handle کرنے کے لئے یہی صحیح ہے
+const upload = multer({ storage: multer.none() });
+
+// ---------------------------
+// HEALTH CHECK
+// ---------------------------
 app.get("/", (req, res) => res.json({ ok: true }));
 
-// -------------------------------
-// 📌 RUN BACKUP
-// -------------------------------
+// ---------------------------
+// BACKUP
+// ---------------------------
 app.post("/api/backup", async (req, res) => {
   const result = await doBackup();
   res.json(result);
 });
 
-// -------------------------------
-// 📁 LIST BACKUPS
-// -------------------------------
+// ---------------------------
+// LIST BACKUPS
+// ---------------------------
 app.get("/api/list-backups", async (req, res) => {
   try {
     const result = await listBackups();
@@ -36,22 +40,23 @@ app.get("/api/list-backups", async (req, res) => {
   }
 });
 
-// -------------------------------
-// ♻ RESTORE FROM SUPABASE BUCKET
-// -------------------------------
-app.post("/api/restore-from-bucket", async (req, res) => {
+// ---------------------------
+// RESTORE (FULL + TABLE)
+// ---------------------------
+app.post("/api/restore-from-bucket", upload.none(), async (req, res) => {
   try {
     console.log("REQ BODY:", req.body); // Debug
 
     const result = await restoreFromBucket(req);
+
     if (!result.success) {
       return res.json({ success: false, error: result.error });
     }
 
-    return res.json({ success: true });
+    res.json({ success: true });
 
   } catch (err) {
-    return res.json({ success: false, error: err.message });
+    res.json({ success: false, error: err.message });
   }
 });
 
