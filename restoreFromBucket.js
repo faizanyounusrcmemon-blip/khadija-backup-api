@@ -1,147 +1,144 @@
-// restore-from-bucket.js
 const supabase = require("./db");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const unzipper = require("unzipper");
-const dayjs = require("dayjs");
 
-// Allowed tables
 const TABLES = ["sales", "purchases", "items", "customers", "app_users"];
 
-module.exports = async function restoreFromBucket(req, res) {
+// ============================================
+// MAIN FUNCTION
+// ============================================
+module.exports = async function restoreFromBucket({ body }) {
   try {
-    const { password, fileName, mode, table } = req.body;
+    const { password, fileName, mode, table } = body;
 
+    // ---- Password Check ----
     if (password !== "faizanyounus") {
-      return res.json({ success: false, error: "Invalid password" });
+      return { success: false, error: "Invalid password" };
     }
 
     if (!fileName) {
-      return res.json({ success: false, error: "File name missing" });
+      return { success: false, error: "Missing file name" };
     }
 
     const BUCKET = "backups";
 
-    // Download ZIP from Supabase Storage
+    // ---- DOWNLOAD FILE ----
     const { data, error } = await supabase.storage
       .from(BUCKET)
       .download(fileName);
 
     if (error || !data) {
-      return res.json({
-        success: false,
-        error: "Failed to download backup zip",
-      });
+      return { success: false, error: "Cannot download backup file" };
     }
 
-    // Save ZIP temporarily
+    // ---- CONVERT BUFFER ----
+    const buffer =
+      typeof data.arrayBuffer === "function"
+        ? Buffer.from(await data.arrayBuffer())
+        : Buffer.from(data);
+
     const tmp = os.tmpdir();
     const zipPath = path.join(tmp, fileName);
-    fs.writeFileSync(zipPath, Buffer.from(await data.arrayBuffer()));
 
+    fs.writeFileSync(zipPath, buffer);
+
+    // ---- EXTRACT ZIP ----
     const extractPath = path.join(tmp, "restore_" + Date.now());
     fs.mkdirSync(extractPath, { recursive: true });
 
-    // Extract ZIP
     await fs
       .createReadStream(zipPath)
       .pipe(unzipper.Extract({ path: extractPath }))
       .promise();
 
-    // =============================
-    // FULL RESTORE
-    // =============================
+    // ---- FULL RESTORE ----
     if (mode === "full") {
       for (const tbl of TABLES) {
         const file = path.join(extractPath, `${tbl}.csv`);
-        if (!fs.existsSync(file)) continue;
-
-        await restoreTable(tbl, file);
+        if (fs.existsSync(file)) {
+          await restoreTable(tbl, file);
+        }
       }
     }
 
-    // =============================
-    // SINGLE TABLE RESTORE
-    // =============================
+    // ---- SPECIFIC TABLE RESTORE ----
     if (mode === "table") {
+      if (!table) {
+        return { success: false, error: "Table not provided" };
+      }
+
       const file = path.join(extractPath, `${table}.csv`);
       if (!fs.existsSync(file)) {
-        return res.json({
-          success: false,
-          error: "Table file not found in backup",
-        });
+        return { success: false, error: "CSV not found in backup" };
       }
 
       await restoreTable(table, file);
     }
 
-    return res.json({ success: true });
+    return { success: true };
+
   } catch (err) {
-    return res.json({ success: false, error: err.message });
+    // CRITICAL FIX: return JSON so frontend never crashes
+    return { success: false, error: err.message };
   }
 };
 
-// ------------------------------------------
-// Restore Single Table
-// ------------------------------------------
+// ============================================
+// RESTORE SPECIFIC TABLE
+// ============================================
 async function restoreTable(table, filePath) {
-  console.log("Restoring:", table);
+  const text = fs.readFileSync(filePath, "utf8").trim().split("\n");
+  const header = splitCSV(text[0]);
 
-  // Read CSV
-  const content = fs.readFileSync(filePath, "utf8").split("\n");
-  const header = content[0].split(",");
+  const rows = [];
 
-  const rows = content
-    .slice(1)
-    .filter((l) => l.trim() !== "")
-    .map((line) => {
-      const values = splitCSV(line);
-      const obj = {};
-      header.forEach((h, i) => {
-        obj[h] = values[i] || null;
-      });
-      return obj;
+  for (let i = 1; i < text.length; i++) {
+    const cols = splitCSV(text[i]);
+    const obj = {};
+
+    header.forEach((h, idx) => {
+      obj[h] = cols[idx] || null;
     });
 
-  // Delete old data
-  await supabase.from(table).delete().neq("id", 0);
-
-  // Insert new data
-  const { error } = await supabase.from(table).insert(rows);
-
-  if (error) {
-    console.log("Restore error in table:", table, error.message);
-    throw new Error(error.message);
+    rows.push(obj);
   }
 
-  console.log("Restore completed for:", table);
+  // Delete all rows
+  await supabase.from(table).delete().neq("id", 0);
+
+  // Insert new rows
+  if (rows.length > 0) {
+    await supabase.from(table).insert(rows);
+  }
 }
 
-// ------------------------------------------
-// Helper: Proper CSV splitting
-// ------------------------------------------
+// ============================================
+// CSV PARSER
+// ============================================
 function splitCSV(str) {
-  const arr = [];
-  let cur = "";
+  const out = [];
+  let current = "";
   let insideQuotes = false;
 
   for (let ch of str) {
-    if (ch === '"' && insideQuotes) {
-      insideQuotes = false;
-      continue;
-    }
     if (ch === '"' && !insideQuotes) {
       insideQuotes = true;
       continue;
     }
-    if (ch === "," && !insideQuotes) {
-      arr.push(cur);
-      cur = "";
+    if (ch === '"' && insideQuotes) {
+      insideQuotes = false;
       continue;
     }
-    cur += ch;
+    if (ch === "," && !insideQuotes) {
+      out.push(current);
+      current = "";
+      continue;
+    }
+    current += ch;
   }
-  arr.push(cur);
-  return arr;
+
+  out.push(current);
+  return out;
 }
