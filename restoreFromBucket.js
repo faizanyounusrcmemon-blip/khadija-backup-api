@@ -18,12 +18,11 @@ module.exports = async function restoreFromBucket(req) {
 
     const BUCKET = "backups";
 
-    const { data, error } = await supabase.storage
-      .from(BUCKET)
-      .download(fileName);
+    const { data, error } = await supabase.storage.from(BUCKET).download(fileName);
 
-    if (error || !data)
+    if (error || !data) {
       return { success: false, error: "Failed to download file" };
+    }
 
     const buffer =
       typeof data.arrayBuffer === "function"
@@ -105,6 +104,7 @@ function splitCSV(str) {
     }
     cur += ch;
   }
+
   arr.push(cur);
   return arr;
 }
