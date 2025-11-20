@@ -13,7 +13,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// FormData handle کرنے کیلئے صرف یہی صحیح ہے
+// ✔ FormData handle کرنے کیلئے بالکل صحیح طریقہ
 const upload = multer({ storage: multer.none() });
 
 // ---------------------------
@@ -50,7 +50,7 @@ app.get("/api/list-backups", async (req, res) => {
 // ---------------------------
 app.post("/api/restore-from-bucket", upload.none(), async (req, res) => {
   try {
-    console.log("REQ BODY:", req.body);  // debugging
+    console.log("REQ BODY:", req.body); // Debug check
 
     const result = await restoreFromBucket(req);
 
