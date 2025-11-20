@@ -14,7 +14,7 @@ module.exports = async function listBackups() {
     return data.map((file) => ({
       name: file.name,
       date: new Date(file.created_at).toLocaleString(),
-      size: file.metadata?.size || 0,
+      size: file.metadata?.size || 0
     }));
   } catch (err) {
     console.log("LIST CATCH ERROR:", err.message);
