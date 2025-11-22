@@ -6,15 +6,13 @@ const multer = require("multer");
 const doBackup = require("./backup");
 const listBackups = require("./listBackups");
 const restoreFromBucket = require("./restoreFromBucket");
-
-// ⭐ IMPORT NEW FILE
-const getInvoiceItems = require("./get-invoice-items");
+const getInvoiceItems = require("./get-invoice-items");  // ⭐ NEW IMPORT
 
 const app = express();
 
 app.use(cors());
 
-// ❌ DO NOT USE JSON MIDDLEWARE (BREAKS FORMDATA)
+// ❌ DON’T ADD JSON MIDDLEWARE (BREAKS FORMDATA)
 // app.use(express.json());
 // app.use(express.urlencoded({ extended: true }));
 
@@ -43,14 +41,14 @@ app.post("/api/restore-from-bucket", upload.any(), async (req, res) => {
   }
 });
 
-// ⭐ NEW ROUTE — FULL INVOICE BARCODE PRINT
-app.get("/api/get-invoice-items", getInvoiceItems); 
-// ------------------------------
-//       THIS FIXES THE 404
-// ------------------------------
+// ⭐⭐ NEW — GET INVOICE ITEMS API
+app.get("/api/get-invoice-items", async (req, res) => {
+  try {
+    const result = await getInvoiceItems(req, res);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () =>
-  console.log("🚀 Server running on port", PORT)
-);
-
+app.listen(PORT, () => console.log("🚀 Server running on port", PORT));
