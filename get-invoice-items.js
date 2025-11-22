@@ -1,5 +1,3 @@
-// backend/api/get-invoice-items.js
-
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -17,10 +15,10 @@ export default async function handler(req, res) {
     if (!invoice_no)
       return res.status(400).json({ success: false, error: "Invoice number required" });
 
-    // Fetch all items of invoice (NOT deleted)
+    // ⭐ FETCH FROM PURCHASES TABLE (NOT SALES)
     const { data, error } = await supabase
-      .from("sales")
-      .select("item_code, qty, sale_rate, discount, barcode, item_name")
+      .from("purchases")
+      .select("item_code, item_name, qty, barcode, sale_price")
       .eq("invoice_no", invoice_no)
       .eq("is_deleted", false);
 
