@@ -15,10 +15,10 @@ export default async function handler(req, res) {
     if (!invoice_no)
       return res.status(400).json({ success: false, error: "Invoice number required" });
 
-    // ⭐ FETCH FROM PURCHASES TABLE (NOT SALES)
+    // ⭐ NOW FETCHING FROM PURCHASES TABLE (CORRECT)
     const { data, error } = await supabase
       .from("purchases")
-      .select("item_code, item_name, qty, barcode, sale_price")
+      .select("item_code, qty, sale_price, barcode, item_name")
       .eq("invoice_no", invoice_no)
       .eq("is_deleted", false);
 
