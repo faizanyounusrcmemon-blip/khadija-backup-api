@@ -20,7 +20,7 @@ module.exports = async function doBackup() {
 
     fs.mkdirSync(folder, { recursive: true });
 
-    const TABLES = ["sales", "purchases", "items", "customers", "app_users"];
+    const TABLES = ["sales", "purchases", "items", "customers", "app_users", "sale_returns"];
     const csvFiles = [];
 
     for (const table of TABLES) {
@@ -66,3 +66,4 @@ module.exports = async function doBackup() {
     return { success: false, error: e.message };
   }
 };
+
