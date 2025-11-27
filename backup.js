@@ -1,3 +1,7 @@
+// ==============================
+//   FINAL backup.js (WITH PROGRESS)
+// ==============================
+
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
@@ -10,7 +14,7 @@ dayjs.extend(timezone);
 
 const supabase = require("./db");
 
-module.exports = async function doBackup() {
+module.exports = async function doBackup(progressRef) {
   try {
     const BUCKET = "backups";
 
@@ -18,14 +22,30 @@ module.exports = async function doBackup() {
     const tmp = os.tmpdir();
     const folder = path.join(tmp, `backup_${timestamp}`);
 
+    // Create temp folder
     fs.mkdirSync(folder, { recursive: true });
 
-    const TABLES = ["sales", "purchases", "items", "customers", "app_users", "sale_returns"];
+    const TABLES = [
+      "sales",
+      "purchases",
+      "items",
+      "customers",
+      "app_users",
+      "sale_returns",
+    ];
+
+    let step = 0;
+    const totalSteps = TABLES.length + 2; // +zip +upload
+
     const csvFiles = [];
 
+    // EXPORT EACH TABLE
     for (const table of TABLES) {
       const { data, error } = await supabase.from(table).select("*");
-      if (error || !data) continue;
+      if (error) {
+        console.log("Export error:", error.message);
+        continue;
+      }
 
       const filePath = path.join(folder, `${table}.csv`);
       const keys = Object.keys(data[0] || {});
@@ -37,8 +57,15 @@ module.exports = async function doBackup() {
 
       fs.writeFileSync(filePath, header + rows);
       csvFiles.push(filePath);
+
+      // 🔥 UPDATE PROGRESS
+      step++;
+      progressRef.value = Math.floor((step / totalSteps) * 100);
     }
 
+    // ==========================
+    // CREATE ZIP FILE
+    // ==========================
     const zipPath = path.join(tmp, `backup_${timestamp}.zip`);
 
     await new Promise((resolve, reject) => {
@@ -53,17 +80,24 @@ module.exports = async function doBackup() {
       archive.finalize();
     });
 
+    step++;
+    progressRef.value = Math.floor((step / totalSteps) * 100);
+
+    // ==========================
+    // UPLOAD ZIP TO SUPABASE
+    // ==========================
     const zipData = fs.readFileSync(zipPath);
     await supabase.storage
       .from(BUCKET)
       .upload(`backup_${timestamp}.zip`, zipData, {
         contentType: "application/zip",
-        upsert: true
+        upsert: true,
       });
 
-    return { success: true };
+    progressRef.value = 100;
+
+    return { success: true, message: "Backup completed successfully" };
   } catch (e) {
-    return { success: false, error: e.message };
+    return { success: false, message: e.message };
   }
 };
-
