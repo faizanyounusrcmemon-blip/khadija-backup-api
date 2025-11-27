@@ -1,85 +1,98 @@
+// ===============================
+//  FINAL SERVER.JS (WITH PROGRESS)
+// ===============================
+
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
+const path = require("path");
 
 const doBackup = require("./backup");
-const listBackups = require("./listBackups");
-const restoreFromBucket = require("./restoreFromBucket");
-
-// ⭐ NEW import (Very important)
-const getInvoiceItems = require("./get-invoice-items");
+const restoreBackup = require("./restore");
 
 const app = express();
-
-// ⭐ CORS allow
 app.use(cors());
+app.use(express.json());
 
-// ❌ DO NOT USE JSON BODY HERE (Backup/Restore use FormData)
-// app.use(express.json());
-// app.use(express.urlencoded({ extended: true }));
+// Multer for file upload (restore)
+const upload = multer({ dest: "uploads/" });
 
-// ⭐ File upload for restore
-const upload = multer({ storage: multer.memoryStorage() });
+// ===============================
+//   PROGRESS VARIABLES (GLOBAL)
+// ===============================
+let backupProgress = { value: 0 };
+let restoreProgress = { value: 0 };
 
-// ===========================
-// TEST ROUTE
-// ===========================
-app.get("/", (req, res) => res.json({ ok: true }));
-
-// ===========================
-// BACKUP
-// ===========================
+// ===============================
+//   BACKUP (START BACKUP)
+// ===============================
 app.post("/api/backup", async (req, res) => {
   try {
-    const result = await doBackup();
+    backupProgress.value = 0; // reset progress
+    const result = await doBackup(backupProgress);
     res.json(result);
   } catch (err) {
-    res.json({ success: false, error: err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// ===========================
-// LIST BACKUPS
-// ===========================
-app.get("/api/list-backups", async (req, res) => {
+// ===============================
+//   BACKUP PROGRESS (SSE STREAM)
+// ===============================
+app.get("/api/backup-progress", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+
+  const timer = setInterval(() => {
+    res.write(`data: ${backupProgress.value}\n\n`);
+
+    if (backupProgress.value >= 100) {
+      clearInterval(timer);
+      res.end();
+    }
+  }, 200);
+});
+
+// ===============================
+//   RESTORE (START RESTORE)
+// ===============================
+app.post("/api/restore", upload.single("file"), async (req, res) => {
   try {
-    const files = await listBackups();
-    res.json({ success: true, files });
+    restoreProgress.value = 0; // reset progress
+
+    const result = await restoreBackup(req, res, restoreProgress);
+    return result;
   } catch (err) {
-    res.json({ success: false, error: err.message });
+    return res
+      .status(500)
+      .json({ ok: false, message: err.message || "Restore failed" });
   }
 });
 
-// ===========================
-// RESTORE
-// ===========================
-app.post("/api/restore-from-bucket", upload.any(), async (req, res) => {
-  try {
-    const body = req.body;
-    const response = await restoreFromBucket({ body });
-    res.json(response);
-  } catch (err) {
-    res.json({ success: false, error: err.message });
-  }
+// ===============================
+//   RESTORE PROGRESS (SSE STREAM)
+// ===============================
+app.get("/api/restore-progress", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+
+  const timer = setInterval(() => {
+    res.write(`data: ${restoreProgress.value}\n\n`);
+
+    if (restoreProgress.value >= 100) {
+      clearInterval(timer);
+      res.end();
+    }
+  }, 200);
 });
 
-// =====================================================
-// ⭐⭐ NEW ROUTE — FULL INVOICE BARCODE PRINT API ⭐⭐
-// =====================================================
-app.get("/api/get-invoice-items", async (req, res) => {
-  try {
-    await getInvoiceItems(req, res);
-  } catch (err) {
-    res.status(500).json({
-      success: false,
-      error: err.message,
-    });
-  }
-});
-
-// ===========================
-// START SERVER (when local)
-// ===========================
+// ===============================
+//   SERVER START
+// ===============================
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log("🚀 Server running on port", PORT));
+app.listen(PORT, () => console.log(`✔ Server running on port ${PORT}`));
+
+module.exports = app;
