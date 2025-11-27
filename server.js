@@ -1,5 +1,5 @@
 // ===============================
-//   FINAL SERVER.JS (FULL)
+//   FINAL SERVER.JS (UPDATED FULL)
 // ===============================
 
 require("dotenv").config();
@@ -23,7 +23,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 app.get("/", (req, res) => res.json({ ok: true }));
 
 // ---------------------------------------------------
-// 1) CREATE BACKUP  (ZIP upload to bucket)
+// 1) CREATE BACKUP (ZIP upload)
 // ---------------------------------------------------
 app.post("/api/backup", async (req, res) => {
   const result = await doBackup();
@@ -31,7 +31,7 @@ app.post("/api/backup", async (req, res) => {
 });
 
 // ---------------------------------------------------
-// 2) LIST ALL BACKUPS (For Restore Screen)
+// 2) LIST ALL BACKUPS
 // ---------------------------------------------------
 app.get("/api/list-backups", async (req, res) => {
   const files = await listBackups();
@@ -39,12 +39,11 @@ app.get("/api/list-backups", async (req, res) => {
 });
 
 // ---------------------------------------------------
-// 3) RESTORE FROM BUCKET (full + table restore)
+// 3) RESTORE FROM BUCKET
 // ---------------------------------------------------
 app.post("/api/restore-from-bucket", upload.any(), async (req, res) => {
   try {
-    const body = req.body;
-    const result = await restoreFromBucket({ body });
+    const result = await restoreFromBucket({ body: req.body });
     res.json(result);
   } catch (err) {
     res.json({ success: false, error: err.message });
@@ -52,7 +51,7 @@ app.post("/api/restore-from-bucket", upload.any(), async (req, res) => {
 });
 
 // ---------------------------------------------------
-// 4) DOWNLOAD BACKUP ZIP
+// 4) DOWNLOAD BACKUP FILE
 // ---------------------------------------------------
 app.get("/api/download-backup/:name", async (req, res) => {
   try {
@@ -62,15 +61,9 @@ app.get("/api/download-backup/:name", async (req, res) => {
       .from("backups")
       .download(name);
 
-    if (error || !data) {
-      return res.status(404).send("File not found");
-    }
+    if (error || !data) return res.status(404).send("File not found");
 
-    // convert data to buffer
-    const buffer =
-      typeof data.arrayBuffer === "function"
-        ? Buffer.from(await data.arrayBuffer())
-        : Buffer.from(data);
+    const buffer = Buffer.from(await data.arrayBuffer());
 
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", `attachment; filename="${name}"`);
@@ -81,28 +74,22 @@ app.get("/api/download-backup/:name", async (req, res) => {
 });
 
 // ---------------------------------------------------
-// 5) DELETE BACKUP ZIP (Password Protected)
+// 5) DELETE BACKUP (PASSWORD-PROTECTED)
 // ---------------------------------------------------
 app.post("/api/delete-backup", async (req, res) => {
   try {
-    const { fileName } = req.body;
-    const { password } = req.body;
+    const { fileName, password } = req.body;
 
-    if (!fileName)
-      return res.json({ success: false, error: "Missing file" });
-
-    // Password check
-    if (password !== "faizanyounus") {
-      return res.json({ success: false, error: "Invalid delete password" });
-    }
+    if (!fileName) return res.json({ success: false, error: "Missing file" });
+    if (password !== "faizanyounus")
+      return res.json({ success: false, error: "Invalid password" });
 
     const { error } = await supabase.storage
       .from("backups")
       .remove([fileName]);
 
-    if (error) {
+    if (error)
       return res.json({ success: false, error: error.message });
-    }
 
     return res.json({ success: true });
   } catch (err) {
