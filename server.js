@@ -6,6 +6,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
+const cron = require("node-cron");
 
 const doBackup = require("./backup");
 const listBackups = require("./listBackups");
@@ -96,6 +97,18 @@ app.post("/api/delete-backup", async (req, res) => {
     return res.json({ success: false, error: err.message });
   }
 });
+
+// ---------------------------------------------------
+// 6) AUTO BACKUP AT 2:00 AM DAILY (PAKISTAN TIME)
+// ---------------------------------------------------
+cron.schedule(
+  "0 2 * * *",
+  () => {
+    console.log("⏰ Running automatic backup at 2:00 AM PKT...");
+    doBackup();
+  },
+  { timezone: "Asia/Karachi" }
+);
 
 // ---------------------------------------------------
 
