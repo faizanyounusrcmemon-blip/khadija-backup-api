@@ -110,7 +110,7 @@ cron.schedule(
 );
 
 // =====================================================
-// 7) ARCHIVE PREVIEW (FAST + NO RPC + FIXED)
+// 7) ARCHIVE PREVIEW (SUPER FAST — USING RPC FUNCTION)
 // =====================================================
 app.post("/api/archive-preview", async (req, res) => {
   try {
@@ -119,55 +119,11 @@ app.post("/api/archive-preview", async (req, res) => {
     if (!start_date || !end_date)
       return res.json({ success: false, error: "Missing dates" });
 
-    // ---------- FULL SQL QUERY ----------
-    const sql = `
-      select 
-        item_code,
-        item_name,
-        sum(purchase_qty) as purchase_qty,
-        sum(sale_qty) as sale_qty,
-        sum(return_qty) as return_qty
-      from (
-          select 
-              p.item_code,
-              p.item_name,
-              p.qty as purchase_qty,
-              0 as sale_qty,
-              0 as return_qty
-          from purchases p
-          where p.is_deleted = false
-            and p.purchase_date between '${start_date}' and '${end_date}'
-
-          union all 
-
-          select 
-              s.item_code,
-              null as item_name,
-              0 as purchase_qty,
-              s.qty as sale_qty,
-              0 as return_qty
-          from sales s
-          where s.is_deleted = false
-            and s.sale_date between '${start_date}' and '${end_date}'
-
-          union all
-
-          select
-              r.item_code,
-              null,
-              0,
-              0,
-              r.return_qty
-          from sale_returns r
-          where r.created_at::date between '${start_date}' and '${end_date}'
-      ) t
-      group by item_code, item_name
-      order by item_code;
-    `;
-
-    // ----------- IMPORTANT CHANGE -----------
-    // WE RUN SQL DIRECTLY WITHOUT RPC
-    const { data, error } = await supabase.query(sql);
+    // ⭐⭐⭐ CALL POSTGRES FUNCTION DIRECTLY
+    const { data, error } = await supabase.rpc("archive_summary", {
+      p_start: start_date,
+      p_end: end_date,
+    });
 
     if (error) {
       return res.json({ success: false, error: error.message });
