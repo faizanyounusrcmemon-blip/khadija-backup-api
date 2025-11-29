@@ -1,5 +1,5 @@
 // ===============================
-//   FINAL SERVER.JS (UPDATED FULL)
+//   FINAL SERVER.JS (FULL + ARCHIVE API)
 // ===============================
 
 require("dotenv").config();
@@ -13,7 +13,6 @@ const listBackups = require("./listBackups");
 const restoreFromBucket = require("./restoreFromBucket");
 
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
@@ -110,8 +109,72 @@ cron.schedule(
   { timezone: "Asia/Karachi" }
 );
 
-// ---------------------------------------------------
+// =====================================================
+// 7) ARCHIVE PREVIEW (SUPER FAST OPTIMIZED VERSION)
+// =====================================================
+app.post("/api/archive-preview", async (req, res) => {
+  try {
+    const { start_date, end_date } = req.body;
 
+    if (!start_date || !end_date)
+      return res.json({ success: false, error: "Missing dates" });
+
+    const sql = `
+      select 
+        item_code,
+        item_name,
+        sum(purchase_qty) as purchase_qty,
+        sum(sale_qty) as sale_qty,
+        sum(return_qty) as return_qty
+      from (
+          select 
+              purchases.item_code,
+              purchases.item_name,
+              purchases.qty as purchase_qty,
+              0 as sale_qty,
+              0 as return_qty
+          from purchases
+          where purchases.is_deleted = false
+            and purchases.purchase_date between '${start_date}' and '${end_date}'
+
+          union all 
+
+          select 
+              sales.item_code,
+              null as item_name,
+              0 as purchase_qty,
+              sales.qty as sale_qty,
+              0 as return_qty
+          from sales
+          where sales.is_deleted = false
+            and sales.sale_date between '${start_date}' and '${end_date}'
+
+          union all
+
+          select
+              sale_returns.item_code,
+              null,
+              0,
+              0,
+              sale_returns.return_qty
+          from sale_returns
+          where sale_returns.created_at::date between '${start_date}' and '${end_date}'
+      ) t
+      group by item_code, item_name
+      order by item_code;
+    `;
+
+    const { data, error } = await supabase.rpc("exec_sql", { sql });
+
+    if (error) return res.json({ success: false, error: error.message });
+
+    res.json({ success: true, rows: data });
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
+});
+
+// ---------------------------------------------------
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () =>
   console.log("🚀 Server running on port " + PORT)
