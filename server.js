@@ -1,5 +1,5 @@
 // ===============================
-//   FINAL SERVER.JS (FULL + ARCHIVE API)
+//   FINAL SERVER.JS (FULL WORKING)
 // ===============================
 
 require("dotenv").config();
@@ -98,7 +98,7 @@ app.post("/api/delete-backup", async (req, res) => {
 });
 
 // ---------------------------------------------------
-// 6) AUTO BACKUP AT 2:00 AM DAILY (PAKISTAN TIME)
+// 6) AUTO BACKUP (2 AM DAILY)
 // ---------------------------------------------------
 cron.schedule(
   "0 2 * * *",
@@ -110,7 +110,7 @@ cron.schedule(
 );
 
 // =====================================================
-// 7) ARCHIVE PREVIEW (SUPER FAST OPTIMIZED VERSION)
+// 7) ARCHIVE PREVIEW (FAST + NO RPC + FIXED)
 // =====================================================
 app.post("/api/archive-preview", async (req, res) => {
   try {
@@ -119,6 +119,7 @@ app.post("/api/archive-preview", async (req, res) => {
     if (!start_date || !end_date)
       return res.json({ success: false, error: "Missing dates" });
 
+    // ---------- FULL SQL QUERY ----------
     const sql = `
       select 
         item_code,
@@ -128,45 +129,49 @@ app.post("/api/archive-preview", async (req, res) => {
         sum(return_qty) as return_qty
       from (
           select 
-              purchases.item_code,
-              purchases.item_name,
-              purchases.qty as purchase_qty,
+              p.item_code,
+              p.item_name,
+              p.qty as purchase_qty,
               0 as sale_qty,
               0 as return_qty
-          from purchases
-          where purchases.is_deleted = false
-            and purchases.purchase_date between '${start_date}' and '${end_date}'
+          from purchases p
+          where p.is_deleted = false
+            and p.purchase_date between '${start_date}' and '${end_date}'
 
           union all 
 
           select 
-              sales.item_code,
+              s.item_code,
               null as item_name,
               0 as purchase_qty,
-              sales.qty as sale_qty,
+              s.qty as sale_qty,
               0 as return_qty
-          from sales
-          where sales.is_deleted = false
-            and sales.sale_date between '${start_date}' and '${end_date}'
+          from sales s
+          where s.is_deleted = false
+            and s.sale_date between '${start_date}' and '${end_date}'
 
           union all
 
           select
-              sale_returns.item_code,
+              r.item_code,
               null,
               0,
               0,
-              sale_returns.return_qty
-          from sale_returns
-          where sale_returns.created_at::date between '${start_date}' and '${end_date}'
+              r.return_qty
+          from sale_returns r
+          where r.created_at::date between '${start_date}' and '${end_date}'
       ) t
       group by item_code, item_name
       order by item_code;
     `;
 
-    const { data, error } = await supabase.rpc("exec_sql", { sql });
+    // ----------- IMPORTANT CHANGE -----------
+    // WE RUN SQL DIRECTLY WITHOUT RPC
+    const { data, error } = await supabase.query(sql);
 
-    if (error) return res.json({ success: false, error: error.message });
+    if (error) {
+      return res.json({ success: false, error: error.message });
+    }
 
     res.json({ success: true, rows: data });
   } catch (err) {
