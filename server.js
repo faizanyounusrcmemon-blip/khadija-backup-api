@@ -1,6 +1,6 @@
-// ===============================
-//   FINAL SERVER.JS (FULL WORKING)
-// ===============================
+// =====================================================
+//   FINAL SERVER.JS (FULL WORKING + ARCHIVE PREVIEW)
+// =====================================================
 
 require("dotenv").config();
 const express = require("express");
@@ -8,22 +8,27 @@ const cors = require("cors");
 const multer = require("multer");
 const cron = require("node-cron");
 
+// Local Modules
 const doBackup = require("./backup");
 const listBackups = require("./listBackups");
 const restoreFromBucket = require("./restoreFromBucket");
 
+// Express init
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Supabase Client
 const supabase = require("./db");
 
+// Multer (for temporary file handling)
 const upload = multer({ storage: multer.memoryStorage() });
 
+// Root check
 app.get("/", (req, res) => res.json({ ok: true }));
 
 // ---------------------------------------------------
-// 1) CREATE BACKUP (ZIP upload)
+// 1) CREATE BACKUP
 // ---------------------------------------------------
 app.post("/api/backup", async (req, res) => {
   const result = await doBackup();
@@ -68,13 +73,14 @@ app.get("/api/download-backup/:name", async (req, res) => {
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", `attachment; filename="${name}"`);
     res.send(buffer);
+
   } catch (err) {
     res.status(500).send("Download failed");
   }
 });
 
 // ---------------------------------------------------
-// 5) DELETE BACKUP (PASSWORD-PROTECTED)
+// 5) DELETE BACKUP (PASSWORD PROTECTED)
 // ---------------------------------------------------
 app.post("/api/delete-backup", async (req, res) => {
   try {
@@ -91,9 +97,10 @@ app.post("/api/delete-backup", async (req, res) => {
     if (error)
       return res.json({ success: false, error: error.message });
 
-    return res.json({ success: true });
+    res.json({ success: true });
+
   } catch (err) {
-    return res.json({ success: false, error: err.message });
+    res.json({ success: false, error: err.message });
   }
 });
 
@@ -103,14 +110,14 @@ app.post("/api/delete-backup", async (req, res) => {
 cron.schedule(
   "0 2 * * *",
   () => {
-    console.log("⏰ Running automatic backup at 2:00 AM PKT...");
+    console.log("⏰ Auto backup triggered at 2:00 AM PKT");
     doBackup();
   },
   { timezone: "Asia/Karachi" }
 );
 
 // =====================================================
-// 7) ARCHIVE PREVIEW (SUPER FAST — USING RPC FUNCTION)
+// 7) ARCHIVE PREVIEW (FASTEST — USING RPC FUNCTION)
 // =====================================================
 app.post("/api/archive-preview", async (req, res) => {
   try {
@@ -119,22 +126,24 @@ app.post("/api/archive-preview", async (req, res) => {
     if (!start_date || !end_date)
       return res.json({ success: false, error: "Missing dates" });
 
-    // ⭐⭐⭐ CALL POSTGRES FUNCTION DIRECTLY
+    // Call Supabase PostgreSQL function
     const { data, error } = await supabase.rpc("archive_summary", {
       p_start: start_date,
-      p_end: end_date,
+      p_end: end_date
     });
 
-    if (error) {
+    if (error)
       return res.json({ success: false, error: error.message });
-    }
 
     res.json({ success: true, rows: data });
+
   } catch (err) {
     res.json({ success: false, error: err.message });
   }
 });
 
+// ---------------------------------------------------
+// Start Server
 // ---------------------------------------------------
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () =>
